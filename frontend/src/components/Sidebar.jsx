@@ -69,7 +69,11 @@ const Sidebar = ({
     <div className={itemClass(active)}>
       <Icon className="w-5 h-5 flex-shrink-0" />
       {!isCollapsed && (
-        <span className="menu-text flex-1 flex justify-between items-center">
+        <span
+          className={`menu-text flex-1 flex justify-between items-center ${
+            active ? "font-semibold" : ""
+          }`}
+        >
           <span>{label}</span>
           {badge > 0 && (
             <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-green-500 text-white text-[10px]">
@@ -149,11 +153,6 @@ const Sidebar = ({
           </NavLink>
         )}
 
-        {role === "employee" && (
-          <NavLink to="/employee" className="w-full text-left">
-            {({ isActive }) => <Item icon={FaHome} label="Dashboard" active={isActive} />}
-          </NavLink>
-        )}
       </div>
 
       {/* ---------- DIRECTOR ---------- */}

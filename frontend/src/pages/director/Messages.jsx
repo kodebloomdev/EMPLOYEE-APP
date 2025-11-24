@@ -131,11 +131,11 @@ const DirectorMessages = () => {
     fetchThread();
   }, [activeConversationId, mapMessageToBubble]);
 
-  // Auto-scroll
+  // Auto-scroll only within the messages container so the whole page doesn't jump
   useEffect(() => {
-    if (endRef.current) {
-      endRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    const list = endRef.current?.parentElement;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
   }, [messages]);
 
   // Socket listeners
@@ -258,43 +258,61 @@ const DirectorMessages = () => {
             {contacts.length === 0 ? (
               <div className="p-4 text-xs text-gray-500">No conversations yet.</div>
             ) : (
-              contacts.map((c) => (
-                <button
-                  key={c.otherEmployeeId}
-                  onClick={async () => {
-                    setOtherEmployeeId(c.otherEmployeeId);
-                    setOtherEmployeeName(c.otherName);
-                    setActiveConversationId(c.conversationId);
-                    try {
-                      if (c.conversationId) {
-                        await axios.post(
-                          `http://localhost:5000/api/messages/${c.conversationId}/mark-seen`
-                        );
+              contacts.map((c) => {
+                const isActive =
+                  !!activeConversationId &&
+                  !!c.conversationId &&
+                  String(activeConversationId) === String(c.conversationId);
+
+                const baseBorder =
+                  theme === "dark" ? "border-slate-700" : "border-gray-200";
+                const hoverBg =
+                  theme === "dark" ? "hover:bg-slate-800" : "hover:bg-gray-100";
+                const activeBg =
+                  theme === "dark" ? "bg-slate-800" : "bg-blue-50";
+
+                return (
+                  <button
+                    key={c.otherEmployeeId}
+                    onClick={async () => {
+                      setOtherEmployeeId(c.otherEmployeeId);
+                      setOtherEmployeeName(c.otherName);
+                      setActiveConversationId(c.conversationId);
+                      setError("");
+                      setMessages([]);
+                      try {
+                        if (c.conversationId) {
+                          await axios.post(
+                            `http://localhost:5000/api/messages/${c.conversationId}/mark-seen`
+                          );
+                        }
+                      } catch (err) {
+                        console.error("Error marking Director messages seen:", err);
                       }
-                    } catch (err) {
-                      console.error("Error marking Director messages seen:", err);
-                    }
-                  }}
-                  className="w-full text-left px-3 py-2 hover:bg-slate-800 flex flex-col border-b border-slate-800"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-100">{c.otherName}</span>
-                    <span className="text-[10px] text-gray-400">
-                      {c.lastMessageAt && formatTime(new Date(c.lastMessageAt))}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-xs text-gray-400 truncate max-w-[80%]">
-                      {c.lastMessage}
-                    </span>
-                    {c.unreadCount > 0 && (
-                      <span className="bg-green-500 text-white text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center">
-                        {c.unreadCount}
+                    }}
+                    className={`w-full text-left px-3 py-2 flex flex-col border-b ${baseBorder} ${
+                      isActive ? activeBg : hoverBg
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-gray-100">{c.otherName}</span>
+                      <span className="text-[10px] text-gray-400">
+                        {c.lastMessageAt && formatTime(new Date(c.lastMessageAt))}
                       </span>
-                    )}
-                  </div>
-                </button>
-              ))
+                    </div>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-xs text-gray-400 truncate max-w-[80%]">
+                        {c.lastMessage}
+                      </span>
+                      {c.unreadCount > 0 && (
+                        <span className="bg-green-500 text-white text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center">
+                          {c.unreadCount}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
             )}
           </div>
 

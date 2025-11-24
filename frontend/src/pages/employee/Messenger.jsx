@@ -159,7 +159,14 @@ const Messenger = () => {
 
       setContacts(merged);
 
-      if (!activeConversationId && merged.length > 0) {
+      // Selection rules:
+      // 1) On first load (no active conversation and no active contact yet),
+      //    default to the first contact if any.
+      // 2) If we have an activeConversationId, re-bind activeContact from it.
+      // 3) Otherwise, if we have an activeContact (user manually picked someone
+      //    without an existing conversation yet), keep that selection based on
+      //    otherEmployeeId so it doesn't jump back to the first contact.
+      if (!activeConversationId && !activeContact && merged.length > 0) {
         setActiveConversationId(merged[0].conversationId || null);
         setActiveContact(merged[0]);
       } else if (activeConversationId) {
@@ -167,6 +174,14 @@ const Messenger = () => {
           (c) => String(c.conversationId) === String(activeConversationId)
         );
         if (found) setActiveContact(found);
+      } else if (activeContact && activeContact.otherEmployeeId) {
+        const foundByOther = merged.find(
+          (c) =>
+            c.otherEmployeeId &&
+            String(c.otherEmployeeId) ===
+              String(activeContact.otherEmployeeId)
+        );
+        if (foundByOther) setActiveContact(foundByOther);
       }
     } catch (err) {
       console.error("Error loading employee messenger contacts:", err);
@@ -210,10 +225,11 @@ const Messenger = () => {
     fetchMessages();
   }, [activeConversationId, mapMessageToBubble]);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages, but only inside the chat list container
   useEffect(() => {
-    const el = endRef.current;
-    if (el) el.scrollIntoView({ behavior: "smooth" });
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
   }, [messages]);
 
   // Socket listeners for realtime updates
@@ -364,45 +380,73 @@ const Messenger = () => {
                 No conversations yet. Start by messaging your HR, PM, or Director.
               </div>
             ) : (
-              contacts.map((c) => (
-                <button
-                  key={c.otherEmployeeId}
-                  onClick={() => {
-                    setActiveConversationId(c.conversationId || null);
-                    setActiveContact(c);
-                  }}
-                  className={`w-full text-left px-3 py-2 flex flex-col border-b ${
-                    theme === "dark"
-                      ? "border-slate-800 hover:bg-slate-800"
-                      : "border-gray-200 hover:bg-gray-100"
-                  }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <span
-                      className={`text-sm font-medium ${
-                        theme === "dark" ? "text-gray-100" : "text-gray-800"
-                      }`}
-                    >
-                      {c.otherName}
-                    </span>
-                    <span className="text-[10px] text-gray-400">
-                      {c.lastMessageAt &&
-                        formatTime(new Date(c.lastMessageAt))}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-xs text-gray-400 truncate max-w-[80%]">
-                      {c.lastMessage ||
-                        `Chat with your ${c.otherRole || "contact"}`}
-                    </span>
-                    {c.unreadCount > 0 && (
-                      <span className="bg-green-500 text-white text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center">
-                        {c.unreadCount}
+              contacts.map((c) => {
+                const isActive =
+                  (activeContact &&
+                    String(activeContact.otherEmployeeId) ===
+                      String(c.otherEmployeeId)) ||
+                  (!!activeConversationId &&
+                    !!c.conversationId &&
+                    String(activeConversationId) ===
+                      String(c.conversationId));
+
+                const baseBorder =
+                  theme === "dark" ? "border-slate-800" : "border-gray-200";
+                const hoverBg =
+                  theme === "dark" ? "hover:bg-slate-800" : "hover:bg-gray-100";
+                const activeBg =
+                  theme === "dark" ? "bg-slate-800" : "bg-blue-50";
+
+                return (
+                  <button
+                    key={c.otherEmployeeId}
+                    onClick={async () => {
+                      setActiveConversationId(c.conversationId || null);
+                      setActiveContact(c);
+                      setError("");
+                      setMessages([]); // clear previous thread immediately
+
+                      if (c.conversationId) {
+                        try {
+                          await axios.post(
+                            `http://localhost:5000/api/messages/${c.conversationId}/mark-seen`
+                          );
+                        } catch (_e) {
+                          // ignore mark-seen failures in client
+                        }
+                      }
+                    }}
+                    className={`w-full text-left px-3 py-2 flex flex-col border-b ${baseBorder} ${
+                      isActive ? activeBg : hoverBg
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span
+                        className={`text-sm font-medium ${
+                          theme === "dark" ? "text-gray-100" : "text-gray-800"
+                        }`}
+                      >
+                        {c.otherName}
                       </span>
-                    )}
-                  </div>
-                </button>
-              ))
+                      <span className="text-[10px] text-gray-400">
+                        {c.lastMessageAt &&
+                          formatTime(new Date(c.lastMessageAt))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-xs text-gray-400 truncate max-w-[80%]">
+                        {c.lastMessage ||
+                          `Chat with your ${c.otherRole || "contact"}`}
+                      </span>
+                      {c.unreadCount > 0 && (
+                        <span className="bg-green-500 text-white text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center">
+                          {c.unreadCount}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
             )}
           </div>
 

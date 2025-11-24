@@ -6,6 +6,69 @@ import { auth } from "../middleware/auth.js";
 
 const router = express.Router();
 
+// --- Role / permission helpers -------------------------------------------------
+
+const normalizeRole = (role) => (role || "").toLowerCase();
+
+/**
+ * Check if `fromEmp` is allowed to send a message to `toEmp` according
+ * to the business rules described in the requirements.
+ */
+const canMessage = (fromEmp, toEmp) => {
+  if (!fromEmp || !toEmp) return false;
+
+  const fromId = fromEmp._id.toString();
+  const toId = toEmp._id.toString();
+  if (fromId === toId) return false; // no self-chat
+
+  const fromRole = normalizeRole(fromEmp.role);
+  const toRole = normalizeRole(toEmp.role);
+
+  // Directors: can send and receive messages from HR, PM, and Employees.
+  if (fromRole === "director") {
+    return ["hr", "project managers", "employee"].includes(toRole);
+  }
+
+  // HR & PM: can send and receive messages with Director and with their assigned Employees.
+  if (fromRole === "hr") {
+    if (toRole === "director") return true;
+    if (toRole === "employee") {
+      return (
+        toEmp.assignedHr && toEmp.assignedHr.toString() === fromId
+      );
+    }
+    return false;
+  }
+
+  if (fromRole === "project managers") {
+    if (toRole === "director") return true;
+    if (toRole === "employee") {
+      return (
+        toEmp.assignedPm && toEmp.assignedPm.toString() === fromId
+      );
+    }
+    return false;
+  }
+
+  // Employees: can send and receive messages only with their assigned HR/PM and the Director.
+  if (fromRole === "employee") {
+    if (toRole === "director") return true;
+    if (toRole === "hr") {
+      return (
+        fromEmp.assignedHr && fromEmp.assignedHr.toString() === toId
+      );
+    }
+    if (toRole === "project managers") {
+      return (
+        fromEmp.assignedPm && fromEmp.assignedPm.toString() === toId
+      );
+    }
+    return false;
+  }
+
+  return false;
+};
+
 // Helper: find or create 1:1 conversation between two employees
 const getOrCreateConversation = async (aId, bId) => {
   const a = aId.toString();
@@ -34,7 +97,7 @@ const sanitizeText = (text) => {
 
 // Simple in-memory rate limiting: max 30 messages per minute per user
 const sendRateState = new Map();
-const canSendMessage = (employeeId) => {
+const canSendMessageRate = (employeeId) => {
   const key = employeeId.toString();
   const now = Date.now();
   const windowMs = 60 * 1000;
@@ -64,7 +127,7 @@ router.post("/", auth, async (req, res) => {
       return res.status(400).json({ message: "Missing sender or recipient" });
     }
 
-    if (!canSendMessage(fromEmployeeId)) {
+    if (!canSendMessageRate(fromEmployeeId)) {
       return res
         .status(429)
         .json({ message: "Rate limit exceeded. Please slow down." });
@@ -77,6 +140,14 @@ router.post("/", auth, async (req, res) => {
 
     if (!fromEmp || !toEmp) {
       return res.status(404).json({ message: "Employee not found" });
+    }
+
+    // 🔒 Role- and assignment-based permission check
+    if (!canMessage(fromEmp, toEmp)) {
+      return res.status(403).json({
+        message:
+          "You are not allowed to message this user based on role and assignment rules.",
+      });
     }
 
     const cleanText = sanitizeText(text || content || "");
@@ -160,28 +231,40 @@ router.get("/contacts", auth, async (req, res) => {
     const meId = req.user.employeeId;
     if (!meId) return res.status(400).json({ message: "No employee id" });
 
+    const me = await Employee.findById(meId);
+    if (!me) return res.status(404).json({ message: "Employee not found" });
+
     const convos = await Conversation.find({
       participants: meId,
     })
       .sort({ lastMessageAt: -1 })
-      .populate("participants", "name role");
+      .populate("participants", "name role assignedHr assignedPm");
 
-    const result = convos.map((c) => {
-      const meKey = meId.toString();
-      const other = c.participants.find(
-        (p) => p && p._id && p._id.toString() !== meKey
-      );
+    const meKey = meId.toString();
 
-      return {
-        conversationId: c._id,
-        otherEmployeeId: other?._id,
-        otherName: other?.name || "Unknown",
-        otherRole: other?.role || "employee",
-        lastMessage: c.lastMessageText || "",
-        lastMessageAt: c.lastMessageAt,
-        unreadCount: (c.unreadCounts && c.unreadCounts.get(meKey)) || 0,
-      };
-    });
+    const result = convos
+      .map((c) => {
+        const other = c.participants.find(
+          (p) => p && p._id && p._id.toString() !== meKey
+        );
+        if (!other) return null;
+
+        // Enforce role-based chat visibility as well
+        if (!canMessage(me, other) && !canMessage(other, me)) {
+          return null;
+        }
+
+        return {
+          conversationId: c._id,
+          otherEmployeeId: other._id,
+          otherName: other.name || "Unknown",
+          otherRole: other.role || "employee",
+          lastMessage: c.lastMessageText || "",
+          lastMessageAt: c.lastMessageAt,
+          unreadCount: (c.unreadCounts && c.unreadCounts.get(meKey)) || 0,
+        };
+      })
+      .filter(Boolean);
 
     res.json(result);
   } catch (err) {
@@ -199,6 +282,19 @@ router.get("/thread/:conversationId", auth, async (req, res) => {
     const convo = await Conversation.findById(conversationId);
     if (!convo || !convo.participants.some((p) => p.toString() === meId)) {
       return res.status(404).json({ message: "Conversation not found" });
+    }
+
+    const otherId = convo.participants.find((p) => p.toString() !== meId);
+
+    const [me, other] = await Promise.all([
+      Employee.findById(meId),
+      otherId ? Employee.findById(otherId) : null,
+    ]);
+
+    if (!me || !other || (!canMessage(me, other) && !canMessage(other, me))) {
+      return res.status(403).json({
+        message: "You are not allowed to view this conversation.",
+      });
     }
 
     const messages = await Message.find({ conversation: conversationId })
@@ -223,6 +319,19 @@ router.post("/:conversationId/mark-seen", auth, async (req, res) => {
       return res.status(404).json({ message: "Conversation not found" });
     }
 
+    const otherId = convo.participants.find((p) => p.toString() !== meId);
+
+    const [me, other] = await Promise.all([
+      Employee.findById(meId),
+      otherId ? Employee.findById(otherId) : null,
+    ]);
+
+    if (!me || !other || (!canMessage(me, other) && !canMessage(other, me))) {
+      return res.status(403).json({
+        message: "You are not allowed to modify this conversation.",
+      });
+    }
+
     await Message.updateMany(
       { conversation: conversationId, to: meId, seen: false },
       { $set: { seen: true } }
@@ -235,7 +344,6 @@ router.post("/:conversationId/mark-seen", auth, async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
-      const otherId = convo.participants.find((p) => p.toString() !== meId);
       const payload = {
         conversationId: convo._id,
         seenBy: meId,
@@ -264,14 +372,26 @@ router.get("/unread-summary", auth, async (req, res) => {
     const meId = req.user.employeeId?.toString();
     if (!meId) return res.status(400).json({ message: "No employee id" });
 
+    const me = await Employee.findById(meId);
+    if (!me) return res.status(404).json({ message: "Employee not found" });
+
     const convos = await Conversation.find({ participants: meId })
       .select("unreadCounts lastMessageAt lastMessageText participants lastMessageFrom")
-      .populate("lastMessageFrom", "name role");
+      .populate("lastMessageFrom", "name role")
+      .populate("participants", "role assignedHr assignedPm");
 
     let total = 0;
     const items = [];
 
     for (const c of convos) {
+      const other = c.participants.find((p) => p && p._id.toString() !== meId);
+      if (!other) continue;
+
+      // Skip conversations not allowed by role rules
+      if (!canMessage(me, other) && !canMessage(other, me)) {
+        continue;
+      }
+
       const meUnread = (c.unreadCounts && c.unreadCounts.get(meId)) || 0;
       if (!meUnread) continue;
       total += meUnread;
