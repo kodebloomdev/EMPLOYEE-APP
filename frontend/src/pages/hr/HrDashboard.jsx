@@ -10,6 +10,7 @@ const HrDashboard = () => {
   const [hrDetails, setHrDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pendingCredentialsCount, setPendingCredentialsCount] = useState(0);
+  const [pendingLeavesCount, setPendingLeavesCount] = useState(0);
 
   const navigate = useNavigate();
 
@@ -98,6 +99,16 @@ const HrDashboard = () => {
         ).length;
 
         setPendingCredentialsCount(pendingCreds);
+
+        // Fetch pending leaves for this HR for dashboard card
+        try {
+          const leavesRes = await axios.get(
+            "http://localhost:5000/api/leaves/hr/pending"
+          );
+          setPendingLeavesCount(leavesRes.data?.length || 0);
+        } catch (leavesErr) {
+          console.error("Error fetching pending leaves:", leavesErr);
+        }
       } catch (err) {
         console.error("Error fetching employees:", err);
       } finally {
@@ -109,7 +120,6 @@ const HrDashboard = () => {
   }, [hrDetails]);
 
   // Example values for other cards (replace with real API calls when available)
-  const leaveRequests = 7;
   const recruitmentOpen = 5;
 
   return (
@@ -249,13 +259,13 @@ const HrDashboard = () => {
                 </div>
               </div>
 
-              {/* Leave Requests */}
+                {/* Leave Requests */}
               <div className="bg-white rounded-lg p-5 shadow border flex flex-col justify-between">
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="text-sm text-gray-500">Leave Requests</h3>
                     <p className="text-3xl font-extrabold text-blue-900 mt-4">
-                      {leaveRequests}
+                      {loading ? "…" : pendingLeavesCount}
                     </p>
                     <p className="text-xs text-gray-400 mt-1">
                       Pending approval

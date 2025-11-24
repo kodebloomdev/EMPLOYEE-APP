@@ -65,39 +65,21 @@ const LeaveApplication = () => {
 
     setLoading(true);
     try {
-      let headers = {};
-      let payload;
-      if (attachment) {
-        payload = new FormData();
-        payload.append("employeeId", employeeId);
-        payload.append("employeeName", employeeName);
-        payload.append("leaveType", form.leaveType);
-        payload.append("startDate", form.startDate);
-        payload.append("endDate", form.endDate);
-        payload.append("reason", form.reason);
-        payload.append("contactDuringLeave", form.contactDuringLeave);
-        payload.append("attachment", attachment);
-        headers["Content-Type"] = "multipart/form-data";
-      } else {
-        payload = {
-          employeeId,
-          employeeName,
-          leaveType: form.leaveType,
-          startDate: form.startDate,
-          endDate: form.endDate,
-          reason: form.reason,
-          contactDuringLeave: form.contactDuringLeave,
-        };
-        headers["Content-Type"] = "application/json";
-      }
+      const payload = {
+        leaveType: form.leaveType,
+        startDate: form.startDate,
+        endDate: form.endDate,
+        reason: form.reason,
+        contactDuringLeave: form.contactDuringLeave,
+      };
 
-      // Simulating API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      console.log("Submitting:", payload);
-      // const res = await axios.post(`${BASE_URL}/api/leave/apply`, payload, { headers });
+      const res = await axios.post("http://localhost:5000/api/leaves", payload, {
+        headers: { "Content-Type": "application/json" },
+      });
 
-      // setSuccess(res.data?.message || "Leave application submitted successfully.");
-      setSuccess("Leave application submitted successfully."); // Mock success
+      setSuccess(
+        res.data?.message || "Leave application submitted successfully."
+      );
 
       setForm({
         leaveType: "Annual",

@@ -6,6 +6,8 @@ export default function AttendanceLeavePanel() {
   const [attendance, setAttendance] = useState([]);
   const [month, setMonth] = useState("");
   const [employeesMap, setEmployeesMap] = useState({}); // ID → name map
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveLoading, setLeaveLoading] = useState(false);
 
   const storedUser = JSON.parse(localStorage.getItem("users"));
   const isEmployee = storedUser?.role === "employee";
@@ -62,6 +64,29 @@ export default function AttendanceLeavePanel() {
   }, [month]);
 
   // ---------------------------------------------------------------------
+  // Fetch pending leave requests for this HR
+  // ---------------------------------------------------------------------
+  const fetchLeaveRequests = async () => {
+    try {
+      setLeaveLoading(true);
+      const res = await axios.get(
+        "http://localhost:5000/api/leaves/hr/pending"
+      );
+      setLeaveRequests(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Leave Requests Fetch Error:", err);
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isEmployee) {
+      fetchLeaveRequests();
+    }
+  }, [isEmployee]);
+
+  // ---------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------
   const formatTime = (value) => {
@@ -93,21 +118,17 @@ export default function AttendanceLeavePanel() {
     return employeesMap[row.employee] || "Unknown";
   };
 
-  // Demo leave requests
-  const leaveRequests = [
-    {
-      name: "Ritwik Komaragiri",
-      date: "2025-11-28",
-      reason: "Medical",
-      status: "Pending",
-    },
-    {
-      name: "Sanjay Kumar",
-      date: "2025-11-30",
-      reason: "Personal",
-      status: "Pending",
-    },
-  ];
+  const handleLeaveAction = async (id, action) => {
+    try {
+      await axios.patch(
+        `http://localhost:5000/api/leaves/${id}/status`,
+        { status: action }
+      );
+      setLeaveRequests((prev) => prev.filter((req) => req._id !== id));
+    } catch (err) {
+      console.error("Update leave status error:", err);
+    }
+  };
 
   // ---------------------------------------------------------------------
   // JSX
@@ -209,23 +230,56 @@ export default function AttendanceLeavePanel() {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <h3 className="font-bold mb-3 text-xl">Pending Leave Requests</h3>
 
-        {leaveRequests.map((req, idx) => (
+        {leaveLoading && (
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            Loading leave requests...
+          </div>
+        )}
+
+        {!leaveLoading && leaveRequests.length === 0 && (
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            No pending leave requests.
+          </div>
+        )}
+
+        {leaveRequests.map((req) => (
           <div
-            key={idx}
+            key={req._id}
             className="flex justify-between items-center p-4 rounded-lg border dark:border-gray-600 mb-3"
           >
             <div>
-              <h4 className="font-semibold">{req.name}</h4>
+              <h4 className="font-semibold">
+                {req.employee?.name || "Unknown Employee"}
+              </h4>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {req.date} • {req.reason}
+                {req.leaveType} •
+                {" "}
+                {req.startDate
+                  ? new Date(req.startDate).toLocaleDateString()
+                  : ""}
+                {" "}
+                -
+                {" "}
+                {req.endDate
+                  ? new Date(req.endDate).toLocaleDateString()
+                  : ""}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Reason: {req.reason}
               </p>
             </div>
 
             <div className="flex gap-3">
-              <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded flex items-center gap-2">
+              <button
+                onClick={() => handleLeaveAction(req._id, "Approved")}
+                className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded flex items-center gap-2"
+              >
                 <FiCheck /> Approve
               </button>
-              <button className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded flex items-center gap-2">
+              <button
+                onClick={() => handleLeaveAction(req._id, "Rejected")}
+                className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded flex items-center gap-2"
+              >
                 <FiX /> Reject
               </button>
             </div>

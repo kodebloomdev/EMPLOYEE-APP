@@ -21,6 +21,8 @@ import performanceRoutes from "./routes/performanceRoutes.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import attendanceRoutes from "./routes/AttendanceRoutes.js";
+import leaveRoutes from "./routes/leaveRoutes.js";
+import { auth as authMiddleware } from "./middleware/auth.js";
 
 // Models
 import Notification from "./models/Notification.js";
@@ -46,6 +48,7 @@ app.use(
   })
 );
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/leaves", leaveRoutes);
 
 // ✅ Health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -76,6 +79,18 @@ app.post("/api/notifications", async (req, res) => {
     const notification = new Notification({ to, title, body, data });
     await notification.save();
 
+    try {
+      const io = req.app.get("io");
+      if (io && notification.to) {
+        io.to(`user:${notification.to.toString()}`).emit(
+          "notification:new",
+          notification
+        );
+      }
+    } catch (emitErr) {
+      console.error("Error emitting notification via socket:", emitErr);
+    }
+
     res.status(201).json(notification);
   } catch (error) {
     console.error("Error creating notification:", error);
@@ -83,14 +98,30 @@ app.post("/api/notifications", async (req, res) => {
   }
 });
 
-// ✅ Fetch all notifications
+// ✅ Fetch all notifications (admin/debug)
 app.get("/api/fetchnotifications", async (_req, res) => {
   try {
-    const notifications = await Notification.find()
-      .sort({ createdAt: -1 });
+    const notifications = await Notification.find().sort({ createdAt: -1 });
     res.json(notifications);
   } catch (error) {
     console.error("Error fetching notifications:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ✅ Fetch notifications for logged-in employee
+app.get("/api/notifications/mine", authMiddleware, async (req, res) => {
+  try {
+    const { employeeId } = req.user || {};
+    if (!employeeId) {
+      return res.status(400).json({ message: "Employee context missing" });
+    }
+
+    const notifications = await Notification.find({ to: employeeId })
+      .sort({ createdAt: -1 });
+    res.json(notifications);
+  } catch (error) {
+    console.error("Error fetching user notifications:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

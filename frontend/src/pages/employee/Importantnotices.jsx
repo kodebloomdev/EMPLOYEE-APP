@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { ThemeContext } from "../../context/ThemeContext";
+import { getSocket } from "../../utils/socket";
 
 // Detailed view of all notifications shown under the header bell
 const ImportantNotices = ({ notifications: propNotifications }) => {
@@ -13,7 +14,9 @@ const ImportantNotices = ({ notifications: propNotifications }) => {
     setLoading(true);
     setError("");
     try {
-      const res = await axios.get("http://localhost:5000/api/fetchnotifications");
+      const res = await axios.get(
+        "http://localhost:5000/api/notifications/mine"
+      );
       setNotifications(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error("Error fetching notifications:", err);
@@ -25,6 +28,21 @@ const ImportantNotices = ({ notifications: propNotifications }) => {
 
   useEffect(() => {
     if (!propNotifications) fetchNotifications();
+
+    let socket;
+    try {
+      socket = getSocket();
+      const handleNewNotification = (notif) => {
+        setNotifications((prev) => [notif, ...(prev || [])]);
+      };
+      socket.on("notification:new", handleNewNotification);
+
+      return () => {
+        socket.off("notification:new", handleNewNotification);
+      };
+    } catch (_e) {
+      // ignore socket errors
+    }
   }, [propNotifications]);
 
   const containerStyle = useMemo(

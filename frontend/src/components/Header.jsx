@@ -14,7 +14,8 @@ const Header = ({ toggleSidebar }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [user, setUser] = useState({ name: "", role: "" });
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState([]); // message summaries
+  const [noticeNotifications, setNoticeNotifications] = useState([]); // important notices
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -77,6 +78,8 @@ const Header = ({ toggleSidebar }) => {
 
   const clearNotifications = () => {
     setNotificationCount(0);
+    setNotifications([]);
+    setNoticeNotifications([]);
     setShowNotifications(false);
   };
 
@@ -88,8 +91,24 @@ const Header = ({ toggleSidebar }) => {
           "http://localhost:5000/api/messages/unread-summary"
         );
         const data = res.data || {};
-        setNotificationCount(data.totalUnread || 0);
         setNotifications(data.items || []);
+
+        // Fetch important notices for this user
+        let noticesCount = 0;
+        try {
+          const noticesRes = await axios.get(
+            "http://localhost:5000/api/notifications/mine"
+          );
+          const notices = Array.isArray(noticesRes.data)
+            ? noticesRes.data
+            : [];
+          setNoticeNotifications(notices);
+          noticesCount = notices.length;
+        } catch (notifErr) {
+          console.error("Error fetching user notifications:", notifErr);
+        }
+
+        setNotificationCount((data.totalUnread || 0) + noticesCount);
       } catch (err) {
         console.error("Error fetching message unread summary:", err);
       } finally {
@@ -109,9 +128,16 @@ const Header = ({ toggleSidebar }) => {
       socket.on("conversation:updated", handleUpdate);
       socket.on("message:new", handleUpdate);
 
+      const handleNewNotification = (notif) => {
+        setNoticeNotifications((prev) => [notif, ...(prev || [])]);
+        setNotificationCount((prev) => prev + 1);
+      };
+      socket.on("notification:new", handleNewNotification);
+
       return () => {
         socket.off("conversation:updated", handleUpdate);
         socket.off("message:new", handleUpdate);
+        socket.off("notification:new", handleNewNotification);
       };
     } catch (_e) {
       // ignore socket errors in header
@@ -208,11 +234,13 @@ const Header = ({ toggleSidebar }) => {
               </div>
 
               <div className="max-h-60 overflow-y-auto">
-                {notifications.length === 0 && !loading && (
-                  <div className="p-3 text-sm text-gray-500">
-                    No unread messages.
-                  </div>
-                )}
+                {notifications.length === 0 &&
+                  noticeNotifications.length === 0 &&
+                  !loading && (
+                    <div className="p-3 text-sm text-gray-500">
+                      No unread messages or notices.
+                    </div>
+                  )}
                 {notifications.map((n) => (
                   <button
                     key={n.conversationId}
@@ -251,6 +279,40 @@ const Header = ({ toggleSidebar }) => {
                     </p>
                   </button>
                 ))}
+
+                {noticeNotifications.length > 0 && (
+                  <>
+                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 bg-gray-50">
+                      Important Notices
+                    </div>
+                    {noticeNotifications.map((n) => (
+                      <button
+                        key={n._id}
+                        onClick={() => {
+                          if (user.role === "employee") {
+                            navigate("/employee/important-notice");
+                          }
+                          setShowNotifications(false);
+                        }}
+                        className="w-full text-left border-b border-gray-100 last:border-b-0 p-3 hover:bg-gray-50 cursor-pointer"
+                      >
+                        <p className="text-gray-800 font-semibold">
+                          {n.title || "Notification"}
+                        </p>
+                        {n.body && (
+                          <p className="text-gray-600 text-sm mt-1 truncate">
+                            {n.body}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-1">
+                          {n.createdAt
+                            ? new Date(n.createdAt).toLocaleString()
+                            : ""}
+                        </p>
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
 
               <div className="p-2 text-center bg-gray-100">
